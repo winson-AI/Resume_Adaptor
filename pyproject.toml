@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "profile-adaptor"
+version = "0.1.0"
+description = "Adapt resumes to crawled job descriptions using local or web LLMs"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+  "httpx>=0.27.0",
+  "beautifulsoup4>=4.12.0",
+  "trafilatura>=1.12.0",
+  "lxml>=5.0.0",
+  "python-docx>=1.1.0",
+  "pypdf>=4.0.0",
+  "pdfplumber>=0.11.0",
+  "python-dotenv>=1.0.0",
+  "textual>=0.80.0",
+  "fastapi>=0.115.0",
+  "uvicorn>=0.30.0",
+  "python-multipart>=0.0.9",
+  "jinja2>=3.1.0",
+  "reportlab>=4.0.0",
+]
+
+[project.scripts]
+profile-adaptor = "profile_adaptor.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["profile_adaptor*"]

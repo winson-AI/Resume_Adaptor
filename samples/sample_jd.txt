@@ -1,0 +1,25 @@
+Senior Software Engineer — Platform
+
+Company: Acme Labs
+Location: Shanghai / Hybrid
+Salary: 40-60k RMB / month
+
+About the role
+You will design and build backend services for our hiring and talent platform.
+Responsibilities include owning APIs, improving reliability, and collaborating with product.
+
+Responsibilities
+- Design and implement REST APIs in Python
+- Improve observability, CI/CD, and service reliability
+- Partner with frontend and data teams on profile matching features
+- Mentor engineers and review design documents
+
+Requirements
+- 5+ years of software engineering experience
+- Strong Python and distributed systems fundamentals
+- Experience with FastAPI or similar web frameworks
+- Familiarity with Docker, PostgreSQL, and Redis
+- Excellent written communication in English or Chinese
+
+Benefits
+- Hybrid work, health insurance, learning budget
