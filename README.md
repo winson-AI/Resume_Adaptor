@@ -7,8 +7,8 @@ Local-first tool that crawls a hiring job description (JD), parses your resume, 
 - **JD crawl** from URL or local `--jd-file` / pasted text
 - **Resume parse** for `.docx` and `.pdf` (document-skills aligned: `python-docx`, `pdfplumber`/`pypdf`)
 - **Dual LLM**: local Ollama **or** configurable web endpoint
-- **Checkers**: primary job content, job requirements, education, work experience
-- **HITL gates**: salary, work years, work base, template selector
+- **Checkers (pre-rewrite):** work-years, education, skills↔JD, job-content vs experience — large gaps are **noticed**; rewrite proceeds after customer **agreement**
+- **HITL**: optional salary / years / base / template context; **required agreement popup/confirm** to go on rewrite
 - **Surfaces**: Textual **TUI**, local **browser UI**, and one-shot **CLI**
 
 ## Setup
@@ -49,6 +49,7 @@ Any OpenAI-compatible `/v1/chat/completions` server works (including local gatew
 python -m profile_adaptor run \
   --jd-file ./samples/sample_jd.txt \
   --resume ./samples/sample_resume.docx \
+  --agree \
   --salary "40-50k" \
   --years 5 \
   --base "Shanghai" \
@@ -56,26 +57,29 @@ python -m profile_adaptor run \
   --pdf
 ```
 
-HITL fields `--salary`, `--years`, and `--base` are **required** (no silent defaults).
+`--agree` is **required** (customer agreement to rewrite). `--salary` / `--years` / `--base` are optional context.
 
 Template:
 
 - omit `--template` → reuse source resume DOCX layout
 - `--template ./templates/foo.docx` or a filename under `templates/`
 
-### TUI
+## Surfaces (stepped wizard)
+
+**TUI** and **browser** share the same interaction:
+
+1. Input JD URL (or file/paste) + customer resume  
+2. Display fetched JD and parsed resume (light summary/skills correction)  
+3. Run rule + **LLM match audit** on fit dimensions  
+4. Notice the customer when gaps exist  
+5. Optional context + **agreement** to rewrite, then export  
 
 ```bash
 python -m profile_adaptor tui
-```
-
-### Browser UI (localhost)
-
-```bash
 python -m profile_adaptor web --port 8765
 ```
 
-Open http://127.0.0.1:8765 — upload resume, paste/URL JD, confirm HITL fields, select template, download outputs.
+One-shot CLI still available via `python -m profile_adaptor run ...` (HITL flags required up front).
 
 ## Outputs
 
@@ -85,8 +89,9 @@ Written under `output/`:
 |------|---------|
 | `*_adapted.docx` | Adapted resume |
 | `*_adapted.pdf` | Optional PDF |
-| `*_context.json` | HITL + checker + run metadata |
+| `*_context.json` | HITL + checker + run metadata (includes events) |
 | `*_audit.json` | Fidelity audit flags |
+| `*_events.jsonl` | Stage event log (progress, status, results) |
 
 ## Pipeline
 
@@ -101,5 +106,7 @@ Written under `output/`:
 
 - PDF resumes need a DOCX `--template` (source-layout reuse requires DOCX).
 - SPA-heavy job boards may need paste / `--jd-file`.
-- `--strict` fails the run on high-severity audit flags.
-- `--override-checkers` continues despite checker errors (TUI enables this by default after you review fields).
+- `--strict` fails the run on high-severity fidelity flags.
+- `--agree` is required for CLI rewrite; salary/years/base are optional.
+- `--no-fallback` fails closed if the LLM rewrite fails.
+- Review step can correct summary/skills before match audit.

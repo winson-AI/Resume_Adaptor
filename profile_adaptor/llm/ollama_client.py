@@ -8,10 +8,10 @@ import httpx
 
 
 class OllamaClient:
-    def __init__(self, base_url: str, model: str, timeout: float = 180.0) -> None:
+    def __init__(self, base_url: str, model: str, timeout: float = 60.0) -> None:
         self.base_url = base_url.rstrip("/")
         self.model = model
-        self.timeout = timeout
+        self.timeout = httpx.Timeout(timeout, connect=5.0)
 
     def chat(self, messages: List[Dict[str, str]], temperature: float = 0.2) -> str:
         url = f"{self.base_url}/api/chat"
@@ -21,10 +21,18 @@ class OllamaClient:
             "stream": False,
             "options": {"temperature": temperature},
         }
-        with httpx.Client(timeout=self.timeout) as client:
-            resp = client.post(url, json=payload)
-            resp.raise_for_status()
-            data = resp.json()
+        try:
+            with httpx.Client(timeout=self.timeout) as client:
+                resp = client.post(url, json=payload)
+                resp.raise_for_status()
+                data = resp.json()
+        except httpx.TimeoutException as exc:
+            raise RuntimeError(
+                f"Ollama timed out after {self.timeout.read}s talking to {self.model}. "
+                "Is the model loaded? Try a smaller model or raise LLM_TIMEOUT."
+            ) from exc
+        except httpx.HTTPError as exc:
+            raise RuntimeError(f"Ollama request failed: {exc}") from exc
         message = data.get("message") or {}
         content = message.get("content") or data.get("response") or ""
         if not content:

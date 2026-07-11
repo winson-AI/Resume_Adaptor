@@ -26,6 +26,7 @@ class Settings:
     output_dir: Path = field(default_factory=lambda: _ROOT / "output")
     strict: bool = False
     export_pdf: bool = False
+    llm_timeout: float = 60.0
 
     @property
     def model(self) -> str:
@@ -59,6 +60,7 @@ def load_settings(
         output_dir=Path(output_dir or os.getenv("OUTPUT_DIR", str(_ROOT / "output"))),
         strict=strict,
         export_pdf=export_pdf,
+        llm_timeout=float(os.getenv("LLM_TIMEOUT", "60")),
     )
     if model:
         if settings.provider == "ollama":

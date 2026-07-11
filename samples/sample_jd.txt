@@ -16,6 +16,7 @@ Responsibilities
 
 Requirements
 - 5+ years of software engineering experience
+- Bachelor degree in Computer Science or related field
 - Strong Python and distributed systems fundamentals
 - Experience with FastAPI or similar web frameworks
 - Familiarity with Docker, PostgreSQL, and Redis

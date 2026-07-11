@@ -1,8 +1,10 @@
-"""Parse DOCX/PDF resumes into structured ResumeDocument (document-skills aligned)."""
+"""Parse DOCX/PDF resumes into structured ResumeDocument (fast, quiet PDF path)."""
 
 from __future__ import annotations
 
+import logging
 import re
+import warnings
 from pathlib import Path
 from typing import List, Tuple
 
@@ -11,10 +13,10 @@ from pypdf import PdfReader
 
 from profile_adaptor.models import EducationEntry, ExperienceEntry, ResumeDocument
 
-try:
-    import pdfplumber
-except ImportError:  # pragma: no cover
-    pdfplumber = None  # type: ignore
+# pdfplumber/pdfminer emit noisy FontBBox warnings on many Chinese/resume PDFs
+logging.getLogger("pdfminer").setLevel(logging.ERROR)
+logging.getLogger("pdfminer.pdfinterp").setLevel(logging.ERROR)
+logging.getLogger("pdfminer.pdffont").setLevel(logging.ERROR)
 
 SECTION_ALIASES = {
     "summary": [
@@ -54,6 +56,14 @@ SECTION_ALIASES = {
     ],
 }
 
+_HEADING_LOOKUP = {alias: key for key, aliases in SECTION_ALIASES.items() for alias in aliases}
+_TIME_RANGE_RE = re.compile(
+    r"((?:19|20)\d{2}\s*[-–—to至]+\s*(?:(?:19|20)\d{2}|present|now|至今|今))",
+    re.I,
+)
+_BULLET_RE = re.compile(r"^[\-•·*]\s*")
+_EXP_SPLIT_RE = re.compile(r"\n(?=[A-Z\u4e00-\u9fff].{2,80})")
+
 
 def _norm(s: str) -> str:
     return re.sub(r"\s+", " ", (s or "").strip().lower())
@@ -63,14 +73,19 @@ def _is_heading(line: str) -> Tuple[bool, str]:
     n = _norm(line).rstrip(":")
     if not n or len(n) > 60:
         return False, ""
-    for key, aliases in SECTION_ALIASES.items():
-        if n in aliases:
-            return True, key
-    return False, ""
+    key = _HEADING_LOOKUP.get(n)
+    return (True, key) if key else (False, "")
 
 
 def _split_sections(text: str) -> dict:
-    sections = {"contact": "", "summary": "", "skills": "", "experience": "", "education": "", "extras": ""}
+    sections = {
+        "contact": "",
+        "summary": "",
+        "skills": "",
+        "experience": "",
+        "education": "",
+        "extras": "",
+    }
     current = "contact"
     buckets = {k: [] for k in sections}
     for raw in text.splitlines():
@@ -96,7 +111,7 @@ def _parse_experience(block: str) -> List[ExperienceEntry]:
     if not block:
         return []
     entries: List[ExperienceEntry] = []
-    chunks = re.split(r"\n(?=[A-Z\u4e00-\u9fff].{2,80})", block)
+    chunks = _EXP_SPLIT_RE.split(block)
     if len(chunks) == 1:
         chunks = [c for c in re.split(r"\n{2,}", block) if c.strip()]
     for chunk in chunks:
@@ -104,12 +119,8 @@ def _parse_experience(block: str) -> List[ExperienceEntry]:
         if not lines:
             continue
         header = lines[0]
-        time_m = re.search(
-            r"((?:19|20)\d{2}\s*[-–—to至]+\s*(?:(?:19|20)\d{2}|present|now|至今|今))",
-            chunk,
-            re.I,
-        )
-        bullets = [re.sub(r"^[\-•·*]\s*", "", l) for l in lines[1:] if l]
+        time_m = _TIME_RANGE_RE.search(chunk)
+        bullets = [_BULLET_RE.sub("", l) for l in lines[1:] if l]
         employer, title = header, ""
         if " - " in header or " – " in header or "—" in header:
             parts = re.split(r"\s[-–—]\s", header, maxsplit=1)
@@ -136,7 +147,6 @@ def _parse_education(block: str) -> List[EducationEntry]:
     chunks = [c for c in re.split(r"\n{2,}", block) if c.strip()]
     if len(chunks) == 1:
         chunks = [c for c in block.splitlines() if c.strip()]
-        # group consecutive lines loosely
         if len(chunks) > 1:
             entries.append(
                 EducationEntry(
@@ -151,11 +161,7 @@ def _parse_education(block: str) -> List[EducationEntry]:
         lines = [l.strip() for l in chunk.splitlines() if l.strip()]
         if not lines:
             continue
-        time_m = re.search(
-            r"((?:19|20)\d{2}\s*[-–—to至]+\s*(?:(?:19|20)\d{2}|present|now|至今|今))",
-            chunk,
-            re.I,
-        )
+        time_m = _TIME_RANGE_RE.search(chunk)
         entries.append(
             EducationEntry(
                 school=lines[0],
@@ -167,22 +173,63 @@ def _parse_education(block: str) -> List[EducationEntry]:
     return entries
 
 
+def _extract_pdf_with_pypdf(path: Path) -> str:
+    reader = PdfReader(str(path), strict=False)
+    parts = []
+    for page in reader.pages:
+        try:
+            parts.append(page.extract_text() or "")
+        except Exception:
+            continue
+    return "\n".join(parts).strip()
+
+
+def _extract_pdf_with_pdfplumber(path: Path) -> str:
+    try:
+        import pdfplumber
+    except ImportError:
+        return ""
+    parts = []
+    # Suppress pdfminer FontBBox / font descriptor noise
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message=r".*FontBBox.*",
+        )
+        warnings.filterwarnings(
+            "ignore",
+            message=r".*font descriptor.*",
+            category=UserWarning,
+        )
+        try:
+            with pdfplumber.open(str(path)) as pdf:
+                # Resumes are usually short; cap pages for speed
+                for page in pdf.pages[:12]:
+                    try:
+                        parts.append(page.extract_text() or "")
+                    except Exception:
+                        continue
+        except Exception:
+            return ""
+    return "\n".join(parts).strip()
+
+
 def _extract_pdf_text(path: Path) -> str:
-    if pdfplumber is not None:
-        parts = []
-        with pdfplumber.open(str(path)) as pdf:
-            for page in pdf.pages:
-                parts.append(page.extract_text() or "")
-        text = "\n".join(parts).strip()
-        if text:
-            return text
-    reader = PdfReader(str(path))
-    return "\n".join((page.extract_text() or "") for page in reader.pages).strip()
+    """Prefer pypdf (fast, quiet); fall back to pdfplumber only if text is thin."""
+    text = _extract_pdf_with_pypdf(path)
+    # Enough signal for sectioning? otherwise try pdfplumber once
+    if len(text) >= 120 and text.count("\n") >= 3:
+        return text
+    alt = _extract_pdf_with_pdfplumber(path)
+    if len(alt) > len(text):
+        return alt
+    return text
 
 
 def _extract_docx_text(path: Path) -> str:
     doc = Document(str(path))
-    return "\n".join(p.text for p in doc.paragraphs if p.text is not None)
+    # Avoid building huge lists for empty runs
+    return "\n".join(p.text for p in doc.paragraphs if p.text)
 
 
 def parse_resume(path: str) -> ResumeDocument:

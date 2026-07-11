@@ -1,4 +1,4 @@
-"""Work experience checker."""
+"""Work experience presence checker (structure)."""
 
 from __future__ import annotations
 

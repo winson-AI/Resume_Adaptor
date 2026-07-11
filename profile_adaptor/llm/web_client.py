@@ -13,12 +13,12 @@ class WebLLMClient:
         base_url: str,
         api_key: str,
         model: str,
-        timeout: float = 180.0,
+        timeout: float = 60.0,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.model = model
-        self.timeout = timeout
+        self.timeout = httpx.Timeout(timeout, connect=5.0)
 
     def chat(self, messages: List[Dict[str, str]], temperature: float = 0.2) -> str:
         if not self.api_key:
@@ -33,10 +33,17 @@ class WebLLMClient:
             "messages": messages,
             "temperature": temperature,
         }
-        with httpx.Client(timeout=self.timeout) as client:
-            resp = client.post(url, headers=headers, json=payload)
-            resp.raise_for_status()
-            data = resp.json()
+        try:
+            with httpx.Client(timeout=self.timeout) as client:
+                resp = client.post(url, headers=headers, json=payload)
+                resp.raise_for_status()
+                data = resp.json()
+        except httpx.TimeoutException as exc:
+            raise RuntimeError(
+                f"Web LLM timed out after {self.timeout.read}s ({self.model})."
+            ) from exc
+        except httpx.HTTPError as exc:
+            raise RuntimeError(f"Web LLM request failed: {exc}") from exc
         try:
             return data["choices"][0]["message"]["content"].strip()
         except (KeyError, IndexError, TypeError, AttributeError) as exc:

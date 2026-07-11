@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Profile Adaptor</title>
+  <style>
+    :root {
+      --bg: #f3f0e8; --ink: #1c2430; --accent: #0f6b5c; --card: #fffdf8;
+      --muted: #5b6572; --err: #9b2c2c; --ok: #1b5e3b; --warn: #8a5a00;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+      background:
+        radial-gradient(circle at 10% 0%, #dceee8 0%, transparent 40%),
+        radial-gradient(circle at 90% 10%, #efe6d4 0%, transparent 35%),
+        var(--bg);
+      color: var(--ink); min-height: 100vh;
+    }
+    main { max-width: 900px; margin: 0 auto; padding: 2rem 1.25rem 4rem; }
+    h1 { font-family: "IBM Plex Serif", Georgia, serif; font-weight: 600; font-size: 1.9rem; margin: 0 0 0.35rem; }
+    .sub { color: var(--muted); margin-bottom: 1.25rem; }
+    .steps { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 1.25rem; font-size: 0.85rem; }
+    .steps span { padding: 0.25rem 0.55rem; border: 1px solid #cfc5b4; background: #fff; }
+    .steps .on { background: var(--accent); color: #fff; border-color: var(--accent); }
+    .panel { background: var(--card); border: 1px solid #ddd4c4; padding: 1rem 1.2rem; margin-bottom: 1rem; }
+    form { display: grid; gap: 0.85rem; }
+    label { display: grid; gap: 0.35rem; font-size: 0.92rem; font-weight: 600; }
+    input[type=text], input[type=url], select, textarea {
+      font: inherit; padding: 0.55rem 0.65rem; border: 1px solid #cfc5b4; background: #fff;
+    }
+    textarea { min-height: 90px; resize: vertical; }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.85rem; }
+    @media (max-width: 640px) { .row { grid-template-columns: 1fr; } }
+    button {
+      justify-self: start; background: var(--accent); color: white; border: 0;
+      padding: 0.7rem 1.2rem; font: inherit; font-weight: 600; cursor: pointer;
+    }
+    button.secondary { background: #5b6572; }
+    .err { color: var(--err); } .ok { color: var(--ok); } .warn { color: var(--warn); }
+    pre {
+      white-space: pre-wrap; font: inherit; margin: 0.4rem 0 0; max-height: 260px;
+      overflow: auto; background: #faf7f0; padding: 0.75rem; border: 1px solid #e5dccb;
+    }
+    ul { margin: 0.4rem 0 0; padding-left: 1.2rem; }
+    a { color: var(--accent); }
+    .checks { display: flex; flex-wrap: wrap; gap: 1rem; font-weight: 500; }
+    h2 { font-size: 1.1rem; margin: 0 0 0.5rem; }
+    #agree-modal {
+      display: none; position: fixed; inset: 0; background: rgba(28,36,48,0.45);
+      align-items: center; justify-content: center; z-index: 20;
+    }
+    #agree-modal.open { display: flex; }
+    #agree-box {
+      background: var(--card); border: 1px solid #ddd4c4; padding: 1.25rem 1.4rem;
+      max-width: 420px; width: 90%;
+    }
+    .events { font-size: 0.85rem; max-height: 220px; overflow: auto; margin: 0; padding: 0; list-style: none; }
+    .events li { padding: 0.35rem 0; border-bottom: 1px solid #eee6d8; display: grid; gap: 0.1rem; }
+    .events .meta { color: var(--muted); font-size: 0.78rem; }
+    .events .st-ok { color: var(--ok); }
+    .events .st-warn { color: var(--warn); }
+    .events .st-error { color: var(--err); }
+    .events .st-running { color: var(--accent); }
+    #busy {
+      display: none; position: fixed; inset: 0; z-index: 30;
+      background: rgba(28,36,48,0.4); align-items: center; justify-content: center;
+    }
+    #busy.on { display: flex; }
+    #busy-box {
+      background: var(--card); border: 1px solid #ddd4c4; padding: 1.1rem 1.4rem;
+      max-width: 360px; text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Profile Adaptor</h1>
+    <p class="sub">Ingest → review → LLM match audit → notice gaps → agree → rewrite.</p>
+
+    <div class="steps">
+      {% for s in steps %}
+      <span class="{% if session.step == s %}on{% endif %}">{{ loop.index }}. {{ s }}</span>
+      {% endfor %}
+    </div>
+
+    {% if session.error and session.step != 'done' %}
+    <div class="panel err"><strong>Notice:</strong><pre>{{ session.error }}</pre></div>
+    {% endif %}
+
+    {% if session.step == 'ingest' or not session.jd %}
+    <div class="panel">
+      <h2>1. Input JD URL and customer resume</h2>
+      <form action="/ingest" method="post" enctype="multipart/form-data">
+        <input type="hidden" name="session_id" value="{{ session.session_id }}" />
+        <label>Job URL<input type="url" name="url" placeholder="https://..." value="{{ session.url }}" /></label>
+        <label>Or paste JD text<textarea name="jd_text" placeholder="Paste job description…"></textarea></label>
+        <label>Or upload JD file (.txt)<input type="file" name="jd_file_upload" accept=".txt,.md,.html" /></label>
+        <label>Customer resume (.docx / .pdf)<input type="file" name="resume_file" accept=".docx,.pdf" required /></label>
+        <div class="row">
+          <label>LLM provider
+            <select name="provider">
+              <option value="ollama" {% if provider == 'ollama' %}selected{% endif %}>Ollama</option>
+              <option value="web" {% if provider == 'web' %}selected{% endif %}>Web LLM</option>
+            </select>
+          </label>
+          <label>Model<input type="text" name="model" value="{{ model }}" /></label>
+        </div>
+        <button type="submit">Fetch &amp; parse</button>
+      </form>
+    </div>
+    {% endif %}
+
+    {% if session.jd and session.resume and session.step in ['review', 'match_audit', 'hitl', 'done'] %}
+    <div class="panel">
+      <h2>2. Fetched JD &amp; parsed resume</h2>
+      <div class="row">
+        <div>
+          <strong>Job description</strong>
+          <pre>Title: {{ session.jd.title }}
+Company: {{ session.jd.company }}
+Location: {{ session.jd.location_hints or '—' }}
+Salary: {{ session.jd.salary_hints or '—' }}
+
+Responsibilities:
+{{ session.jd.responsibilities[:900] }}
+
+Requirements:
+{{ session.jd.requirements[:900] }}</pre>
+        </div>
+        <div>
+          <strong>Customer resume</strong>
+          <pre>Contact: {{ session.resume.contact[:200] }}
+Summary: {{ session.resume.summary[:300] }}
+Skills: {{ session.resume.skills | join(', ') }}
+
+Experience:
+{% for e in session.resume.experience[:4] %}- {{ e.employer }} | {{ e.title }} | {{ e.time_range }}
+{% endfor %}
+Education:
+{% for e in session.resume.education[:3] %}- {{ e.school }} | {{ e.degree }}
+{% endfor %}</pre>
+        </div>
+      </div>
+      {% if session.step == 'review' %}
+      <form action="/refresh" method="post" enctype="multipart/form-data" style="margin-top:1rem">
+        <input type="hidden" name="session_id" value="{{ session.session_id }}" />
+        <h2 style="font-size:1rem;margin:0">Retry / refresh parse results</h2>
+        <p class="sub" style="margin:0">If the JD shows “加载中 / 请稍候” or BOSS直聘 chrome only, paste the real JD text below and refresh JD.</p>
+        <label>JD URL (optional override)
+          <input type="url" name="url" value="{{ session.url }}" placeholder="https://..." />
+        </label>
+        <label>Or re-paste JD text
+          <textarea name="jd_text" placeholder="Paste updated JD…"></textarea>
+        </label>
+        <label>Or re-upload JD file
+          <input type="file" name="jd_file_upload" accept=".txt,.md,.html" />
+        </label>
+        <label>Re-upload resume (optional)
+          <input type="file" name="resume_file" accept=".docx,.pdf" />
+        </label>
+        <label>Refresh target
+          <select name="target">
+            <option value="both">Both JD + resume</option>
+            <option value="jd">JD only</option>
+            <option value="resume">Resume only</option>
+          </select>
+        </label>
+        <button type="submit">Refresh results</button>
+      </form>
+      <form action="/review-save" method="post" style="margin-top:1rem">
+        <input type="hidden" name="session_id" value="{{ session.session_id }}" />
+        <label>Correct summary (optional)
+          <textarea name="summary">{{ session.resume.summary }}</textarea>
+        </label>
+        <label>Correct skills, comma-separated (optional)
+          <input type="text" name="skills" value="{{ session.resume.skills | join(', ') }}" />
+        </label>
+        <label>Raw notes / extras (optional)
+          <textarea name="notes" placeholder="Optional parse notes…">{{ session.resume.extras }}</textarea>
+        </label>
+        <label class="checks" style="font-weight:500">
+          <input type="checkbox" name="skip_llm" /> Skip LLM — rule-only match audit (faster if Ollama is slow)
+        </label>
+        <button type="submit">Save corrections &amp; run match audit</button>
+      </form>
+      {% endif %}
+    </div>
+    {% endif %}
+
+    {% if session.step in ['match_audit', 'hitl', 'done'] and session.checks %}
+    <div class="panel">
+      <h2>3. Match audit</h2>
+      {% if session.match_audit %}<p><strong>LLM:</strong> {{ session.match_audit.summary }}</p>{% endif %}
+      <ul>
+        {% for r in session.checks.results %}
+        <li class="{% if r.ok %}ok{% elif r.severity == 'warn' %}warn{% else %}err{% endif %}">
+          [{{ r.severity|upper }}] {{ r.name }}: {{ r.message }}
+        </li>
+        {% endfor %}
+      </ul>
+      {% if session.notices %}
+      <p class="warn"><strong>Customer notices (gaps):</strong></p>
+      <ul class="warn">{% for n in session.notices %}<li>{{ n }}</li>{% endfor %}</ul>
+      {% endif %}
+      {% if session.step == 'match_audit' %}
+      <form action="/to-hitl" method="post" style="margin-top:1rem">
+        <input type="hidden" name="session_id" value="{{ session.session_id }}" />
+        <button type="submit">Continue to rewrite agreement</button>
+      </form>
+      {% endif %}
+    </div>
+    {% endif %}
+
+    {% if session.step == 'hitl' %}
+    <div class="panel">
+      <h2>4. Optional context + agreement to rewrite</h2>
+      <form id="rewrite-form" action="/rewrite" method="post" enctype="multipart/form-data">
+        <input type="hidden" name="session_id" value="{{ session.session_id }}" />
+        <input type="hidden" name="agree" id="agree-field" value="" disabled />
+        <div class="row">
+          <label>Salary optional (JD: {{ session.jd.salary_hints if session.jd else '—' }})
+            <input type="text" name="salary" placeholder="40-50k" />
+          </label>
+          <label>Work years optional
+            <input type="text" name="work_years" placeholder="5" />
+          </label>
+        </div>
+        <label>Work base optional (JD: {{ session.jd.location_hints if session.jd else '—' }})
+          <input type="text" name="work_base" placeholder="Shanghai" />
+        </label>
+        <div class="row">
+          <label>Template
+            <select name="template_choice">
+              <option value="source">Use source resume layout</option>
+              {% for t in templates %}<option value="{{ t }}">{{ t.name }}</option>{% endfor %}
+            </select>
+          </label>
+          <label>Or upload template (.docx)<input type="file" name="template_file" accept=".docx" /></label>
+        </div>
+        <div class="checks">
+          <label><input type="checkbox" name="allow_fallback" checked /> Allow LLM fallback</label>
+          <label><input type="checkbox" name="export_pdf" /> Export PDF</label>
+        </div>
+        <button type="button" id="open-agree">Agree &amp; rewrite…</button>
+      </form>
+    </div>
+    <div id="agree-modal" role="dialog" aria-modal="true">
+      <div id="agree-box">
+        <h2>Agreement required</h2>
+        <p>I have reviewed the match audit / gap notices and agree to rewrite the resume.</p>
+        <div class="checks" style="margin-top:1rem">
+          <button type="button" id="confirm-agree">I agree — rewrite</button>
+          <button type="button" class="secondary" id="cancel-agree">Cancel</button>
+        </div>
+      </div>
+    </div>
+    <script>
+      const modal = document.getElementById('agree-modal');
+      const form = document.getElementById('rewrite-form');
+      const agreeField = document.getElementById('agree-field');
+      document.getElementById('open-agree').onclick = () => modal.classList.add('open');
+      document.getElementById('cancel-agree').onclick = () => modal.classList.remove('open');
+      document.getElementById('confirm-agree').onclick = () => {
+        agreeField.disabled = false;
+        agreeField.value = '1';
+        const busy = document.getElementById('busy');
+        if (busy) busy.classList.add('on');
+        form.submit();
+      };
+    </script>
+    {% endif %}
+
+    {% if session.step == 'done' and session.result %}
+    <div class="panel ok">
+      <h2>5. Adapted resume ready</h2>
+      {% if session.result.adapted and session.result.adapted.used_fallback %}
+      <p class="warn"><strong>WARNING:</strong> LLM fallback used — {{ session.result.adapted.fallback_reason }}</p>
+      {% endif %}
+      {% if session.result.fill_report %}
+      <p>Fill report: filled={{ session.result.fill_report.sections_filled }}
+         missing={{ session.result.fill_report.sections_missing }}
+         degraded={{ session.result.fill_report.degraded }}</p>
+      {% endif %}
+      <ul>
+        {% if session.result.output_docx %}<li>DOCX: <a href="/download?path={{ session.result.output_docx }}">download</a></li>{% endif %}
+        {% if session.result.output_pdf %}<li>PDF: <a href="/download?path={{ session.result.output_pdf }}">download</a></li>{% endif %}
+        {% if session.result.audit_json %}<li>Audit: <a href="/download?path={{ session.result.audit_json }}">json</a></li>{% endif %}
+        {% if session.result.context_json %}<li>Context: <a href="/download?path={{ session.result.context_json }}">json</a></li>{% endif %}
+        {% if session.result.events_jsonl %}<li>Events: <a href="/download?path={{ session.result.events_jsonl }}">jsonl</a></li>{% endif %}
+      </ul>
+      {% if session.result.audit %}
+      <p>{{ session.result.audit.summary }}</p>
+      <ul>{% for f in session.result.audit.flags[:8] %}<li>[{{ f.severity }}] {{ f.message }}</li>{% endfor %}</ul>
+      {% endif %}
+      <form action="/restart" method="post" style="margin-top:1rem">
+        <input type="hidden" name="session_id" value="{{ session.session_id }}" />
+        <button type="submit" class="secondary">Start over</button>
+      </form>
+    </div>
+    {% endif %}
+
+    {% if session.events %}
+    <div class="panel">
+      <h2>Event log</h2>
+      <p class="sub" style="margin:0 0 0.5rem">Progress, status, and results for this session.</p>
+      <ul class="events">
+        {% for e in session.events[-40:]|reverse %}
+        <li>
+          <span class="meta">{{ e.ts }} · {{ e.stage }}/{{ e.event }}
+            {% if e.progress is not none %} · {{ (e.progress * 100)|round(0) }}%{% endif %}
+            · <span class="st-{{ e.status }}">{{ e.status }}</span>
+          </span>
+          <span>{{ e.message }}</span>
+        </li>
+        {% endfor %}
+      </ul>
+      {% if session.result and session.result.events_jsonl %}
+      <p style="margin-top:0.75rem"><a href="/download?path={{ session.result.events_jsonl }}">Download events JSONL</a></p>
+      {% endif %}
+    </div>
+    {% endif %}
+  </main>
+  <div id="busy" aria-live="polite">
+    <div id="busy-box">
+      <strong>Working…</strong>
+      <p class="sub" style="margin:0.4rem 0 0">Match audit / rewrite can take up to a minute. If Ollama is busy, use “Skip LLM”.</p>
+    </div>
+  </div>
+  <script>
+    document.querySelectorAll('form').forEach((form) => {
+      form.addEventListener('submit', () => {
+        const busy = document.getElementById('busy');
+        if (busy) busy.classList.add('on');
+      });
+    });
+  </script>
+</body>
+</html>

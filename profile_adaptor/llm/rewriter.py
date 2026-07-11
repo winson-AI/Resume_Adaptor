@@ -32,11 +32,13 @@ def _extract_json(text: str) -> Dict[str, Any]:
         return json.loads(m.group(0))
 
 
-def _fallback_adapt(resume: ResumeDocument, jd: JobDescription) -> AdaptedResume:
+def _fallback_adapt(
+    resume: ResumeDocument,
+    jd: JobDescription,
+    reason: str = "LLM rewrite failed or returned unusable output",
+) -> AdaptedResume:
     """Deterministic fallback when LLM output is unusable."""
     skills = list(resume.skills)
-    # Light keyword expansion from JD requirements tokens already present in raw text
-    req = (jd.requirements or "").lower()
     raw = (resume.raw_text or "").lower()
     for token in re.findall(r"[A-Za-z][A-Za-z0-9+.#-]{2,}", jd.requirements or ""):
         t = token.lower()
@@ -54,7 +56,11 @@ def _fallback_adapt(resume: ResumeDocument, jd: JobDescription) -> AdaptedResume
         experience=list(resume.experience),
         education=list(resume.education),
         extras=resume.extras,
-        change_log=["Fallback adaptation: preserved source content; light skill keyword highlight."],
+        change_log=[
+            "Fallback adaptation: preserved source content; light skill keyword highlight."
+        ],
+        used_fallback=True,
+        fallback_reason=reason,
     )
 
 
@@ -94,6 +100,8 @@ def _to_adapted(data: Dict[str, Any], resume: ResumeDocument) -> AdaptedResume:
         education=edu or list(resume.education),
         extras=str(data.get("extras") or resume.extras),
         change_log=[str(c) for c in (data.get("change_log") or [])],
+        used_fallback=False,
+        fallback_reason="",
     )
 
 
@@ -102,6 +110,7 @@ def rewrite_resume(
     jd: JobDescription,
     resume: ResumeDocument,
     hitl: HitlContext,
+    allow_fallback: bool = True,
 ) -> AdaptedResume:
     messages = [
         {"role": "system", "content": SYSTEM_REWRITE},
@@ -118,5 +127,8 @@ def rewrite_resume(
         raw = client.chat(messages, temperature=0.2)
         data = _extract_json(raw)
         return _to_adapted(data, resume)
-    except Exception:
-        return _fallback_adapt(resume, jd)
+    except Exception as exc:
+        reason = f"LLM rewrite failed: {exc}"
+        if allow_fallback:
+            return _fallback_adapt(resume, jd, reason=reason)
+        raise RuntimeError(reason) from exc

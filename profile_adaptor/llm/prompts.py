@@ -36,6 +36,36 @@ Return ONLY valid JSON:
 No markdown fences.
 """
 
+SYSTEM_MATCH_AUDIT = """You audit fit between a crawled job description and an uploaded resume BEFORE any rewrite.
+
+Evaluate these dimensions:
+1. work_years — JD required years vs resume tenure
+2. education — JD education requirement vs resume education
+3. job_content_vs_experience — JD responsibilities/title vs resume work experience
+4. skills_match — JD requirement keywords vs resume skills and experience evidence
+5. salary_location_hints — note JD salary/location hints (optional human context)
+6. overall_gap — whether the gap is small, moderate, or large
+
+Rules:
+- Do not invent resume facts.
+- Be concrete about gaps.
+- severity: info (ok), warn (moderate gap), high (large gap / blocking concern)
+
+Return ONLY valid JSON:
+{
+  "summary": "short overall assessment",
+  "dimensions": {
+    "work_years": {"severity": "info|warn|high", "message": "..."},
+    "education": {"severity": "info|warn|high", "message": "..."},
+    "job_content_vs_experience": {"severity": "info|warn|high", "message": "..."},
+    "skills_match": {"severity": "info|warn|high", "message": "..."},
+    "salary_location_hints": {"severity": "info|warn|high", "message": "..."}
+  },
+  "flags": [{"severity": "info|warn|high", "message": "string", "field": "dimension_name"}]
+}
+No markdown fences.
+"""
+
 
 def build_rewrite_user_prompt(
     jd_json: str,
@@ -63,4 +93,18 @@ Adapted resume:
 {adapted_json}
 
 Audit fidelity now.
+"""
+
+
+def build_match_audit_user_prompt(jd_json: str, resume_json: str, rule_checks_json: str) -> str:
+    return f"""Job description (JSON):
+{jd_json}
+
+Uploaded resume (JSON):
+{resume_json}
+
+Rule-based checker results (JSON):
+{rule_checks_json}
+
+Audit JD↔resume match dimensions now. Call out large gaps clearly.
 """
